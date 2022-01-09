@@ -1,0 +1,16 @@
+item { 
+	name:'Chair'
+	id:1
+}
+item { 
+	name:'Knob'
+	id:2
+}
+item { 
+	name:'LightSwitch'
+	id:3
+}
+item { 
+	name:'Table'
+	id:4
+}
