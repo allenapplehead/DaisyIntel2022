@@ -8,10 +8,20 @@ from object_detection.utils import config_util
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
+import math
 
 # CONSTANTS
-VID_WIDTH = 800
-VID_HEIGHT = 600
+VID_WIDTH = 800 # the width of the video feed displayed
+VID_HEIGHT = 600 # the height of the video feed displayed
+PROX_THRES = 10 # how close the robot needs to be to an object to count it as disinfected [in pixels]
+                # aka the range of the robot
+FUZZY = 20 # how much tolerance to bounding box detections to suppress it [in pixels]
+
+# SET to keep track of which objects were already disinfected
+vis = set() # tuples of (xmin, ymin, xmax, ymax)
+
+# test
+vis.add((181, 267, 330, 473)) # should display chair as cleaned
 
 # Coordinates from basement
 quad_coords = {
@@ -29,7 +39,7 @@ quad_coords = {
     ])
 }
 
-# Pixel mapper from camera feed to longitutde latitude
+## Pixel mapper from camera feed to longitutde latitude
 class PixelMapper(object):
     """
     Create an object for converting pixels to geographic coordinates,
@@ -89,6 +99,16 @@ class PixelMapper(object):
         
         return (pixel[:2,:]/pixel[2,:]).T
 
+## Distance measurement method
+def dist(x1, x2):
+    """Takes 2 pairs of cooridninates, and finds Euclidean distance between each pair and avg"""
+    ed1 = (x1[0] - x2[0]) ** 2 + (x1[1] - x2[1]) ** 2 
+    ed1 = math.sqrt(ed1)
+
+    ed2 = (x1[0] - x2[0]) ** 2 + (x1[1] - x2[1]) ** 2 
+    ed2 = math.sqrt(ed2)
+
+    return (ed1 + ed2) / 2
 
 # Load pipeline config and build a detection model
 configs = config_util.get_configs_from_pipeline_file("my_ssd_mobnet/pipeline.config")
@@ -132,9 +152,11 @@ while cap.isOpened():
 
     label_id_offset = 1
     image_np_with_detections = image_np.copy()
+    image_np_with_detections_copy = image_np.copy()
 
+    # Get the bounding box coodinates and names
     coords = viz_utils.visualize_boxes_and_labels_on_image_array(
-                image_np_with_detections,
+                image_np_with_detections_copy,
                 detections['detection_boxes'],
                 detections['detection_classes']+label_id_offset,
                 detections['detection_scores'],
@@ -145,10 +167,10 @@ while cap.isOpened():
                 agnostic_mode=False)
 
     # Draw in alignment points for 2D perspective transform from feed to floor
-    cv2.circle(image_np_with_detections, (int(797 * SW), int(598 * SH)), radius=2, color=(0, 0, 255), thickness=-1)
-    cv2.circle(image_np_with_detections, (int(75 * SW), int(480 * SH)), radius=2, color=(0, 0, 255), thickness=-1)
-    cv2.circle(image_np_with_detections, (int(450 * SW), int(317 * SH)), radius=2, color=(0, 0, 255), thickness=-1)
-    cv2.circle(image_np_with_detections, (int(721 * SW), int(343 * SH)), radius=2, color=(0, 0, 255), thickness=-1)
+    #cv2.circle(image_np_with_detections, (int(797 * SW), int(598 * SH)), radius=2, color=(0, 0, 255), thickness=-1)
+    #cv2.circle(image_np_with_detections, (int(75 * SW), int(480 * SH)), radius=2, color=(0, 0, 255), thickness=-1)
+    #cv2.circle(image_np_with_detections, (int(450 * SW), int(317 * SH)), radius=2, color=(0, 0, 255), thickness=-1)
+    #cv2.circle(image_np_with_detections, (int(721 * SW), int(343 * SH)), radius=2, color=(0, 0, 255), thickness=-1)
     
     # Initialize pixel mapper
     pm = PixelMapper(quad_coords["pixel"], quad_coords["lonlat"])
@@ -156,18 +178,42 @@ while cap.isOpened():
     # Display the real world location on the floor for each detected item
     for item in coords:
         # Item: [name, xmin, ymin, xmax, ymax]
-        # Find the centroid of the bounding box
         name, xmin, ymin, xmax, ymax = item[0], item[1], item[2], item[3], item[4]
+        print("DEBUG:", name, xmin, ymin, xmax, ymax)
+
+        # Check if this item has already been disinfected
+        pos = (xmin, ymin, xmax, ymax)
+        cleaned = False
+        for x in vis:
+            if dist(x, pos) <= float(FUZZY):
+                # Already cleaned
+                cleaned = True
+                break
+        
+        # Draw a green bounding box if object is disinfected
+        # A red if the object is not
+        green = (0, 255, 0)
+        red = (0, 0, 255)
+        if cleaned:
+            cv2.rectangle(image_np_with_detections, (xmin, ymin), (xmax, ymax), green, 2)
+        else:
+            cv2.rectangle(image_np_with_detections, (xmin, ymin), (xmax, ymax), red, 2)
+
+        # Find the centroid of the bounding box
         centroid_x = (xmin + xmax) / 2
         centroid_y = (ymin + ymax) / 2
+
         # Map this to the real world
-        tmp = pm.pixel_to_lonlat((centroid_x, centroid_y))
-        vid_x = int(centroid_x * SW)
-        vid_y = int(centroid_y * SH)
+        tmp = pm.pixel_to_lonlat((centroid_x * 1 / SW, centroid_y * 1 / SH))
+        vid_x = int(centroid_x)
+        vid_y = int(centroid_y)
         real_x = int(tmp[0][0] * SW)
         real_y = int(tmp[0][1] * SH)
+
         # Display the transformed centroid on the bounding box
+        # And draw the centroid
         label = name + " IRL Pos (cm): " + str(real_x) + " " + str(real_y)
+        cv2.circle(image_np_with_detections, (vid_x, vid_y), radius = 3, color = (0, 0, 0), thickness = 1)
         cv2.putText(image_np_with_detections, label, (vid_x, vid_y+50),
 				cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
     
