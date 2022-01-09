@@ -13,15 +13,19 @@ import math
 # CONSTANTS
 VID_WIDTH = 800 # the width of the video feed displayed
 VID_HEIGHT = 600 # the height of the video feed displayed
-PROX_THRES = 10 # how close the robot needs to be to an object to count it as disinfected [in pixels]
+PROX_THRES = 35 # how close the robot needs to be to an object to count it as disinfected [in pixels]
                 # aka the range of the robot
 FUZZY = 20 # how much tolerance to bounding box detections to suppress it [in pixels]
 
 # SET to keep track of which objects were already disinfected
 vis = set() # tuples of (xmin, ymin, xmax, ymax)
 
-# test
-vis.add((181, 267, 330, 473)) # should display chair as cleaned
+# Robot position and velocity
+robot_x = 235
+robot_y = 480
+robot_x_vel = 0
+robot_y_vel = -6
+robot_sz = 25
 
 # Coordinates from basement
 quad_coords = {
@@ -179,10 +183,28 @@ while cap.isOpened():
     for item in coords:
         # Item: [name, xmin, ymin, xmax, ymax]
         name, xmin, ymin, xmax, ymax = item[0], item[1], item[2], item[3], item[4]
-        print("DEBUG:", name, xmin, ymin, xmax, ymax)
+        pos = (xmin, ymin, xmax, ymax)
+        #print("DEBUG:", name, xmin, ymin, xmax, ymax)
+
+        # Find the centroid of the bounding box
+        centroid_x = (xmin + xmax) / 2
+        centroid_y = (ymin + ymax) / 2
+
+        # Draw up the robot
+        cv2.rectangle(image_np_with_detections, (robot_x - robot_sz // 2, robot_y - robot_sz // 2), (robot_x + robot_sz // 2, robot_y - robot_sz // 2), (255, 0, 0), 2)
+        cv2.circle(image_np_with_detections, (robot_x, robot_y), radius = robot_sz // 2, color = (255, 0, 0), thickness = 2)
+        cv2.putText(image_np_with_detections, "Robot", (robot_x - robot_sz // 2, robot_y - robot_sz // 2 - 25),
+				cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
+        # Check robot proximity to each detected object
+        d = math.sqrt((robot_x - centroid_x) ** 2 + (robot_y - centroid_y) ** 2)
+        print("DEBUG:", d, robot_x, centroid_x, robot_y, centroid_y)
+        
+        if d <= PROX_THRES:
+            # robot has cleaned this object
+            vis.add(pos)
 
         # Check if this item has already been disinfected
-        pos = (xmin, ymin, xmax, ymax)
         cleaned = False
         for x in vis:
             if dist(x, pos) <= float(FUZZY):
@@ -195,13 +217,15 @@ while cap.isOpened():
         green = (0, 255, 0)
         red = (0, 0, 255)
         if cleaned:
+            lbl = name + " DISINFECTED"
             cv2.rectangle(image_np_with_detections, (xmin, ymin), (xmax, ymax), green, 2)
+            cv2.putText(image_np_with_detections, lbl, (xmin, ymin - 25),
+				cv2.FONT_HERSHEY_SIMPLEX, 0.5, green, 2)
         else:
+            lbl = name + " DIRTY"
             cv2.rectangle(image_np_with_detections, (xmin, ymin), (xmax, ymax), red, 2)
-
-        # Find the centroid of the bounding box
-        centroid_x = (xmin + xmax) / 2
-        centroid_y = (ymin + ymax) / 2
+            cv2.putText(image_np_with_detections, lbl, (xmin, ymin - 25),
+				cv2.FONT_HERSHEY_SIMPLEX, 0.5, red, 2)
 
         # Map this to the real world
         tmp = pm.pixel_to_lonlat((centroid_x * 1 / SW, centroid_y * 1 / SH))
@@ -216,7 +240,14 @@ while cap.isOpened():
         cv2.circle(image_np_with_detections, (vid_x, vid_y), radius = 3, color = (0, 0, 0), thickness = 1)
         cv2.putText(image_np_with_detections, label, (vid_x, vid_y+50),
 				cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
-    
+
+    # Update robot position
+    if robot_y < 300:
+        robot_x_vel = 5
+        robot_y_vel = 0
+    robot_x += robot_x_vel
+    robot_y += robot_y_vel
+
     # Display the resulting frame
     cv2.imshow('object detection',  cv2.resize(image_np_with_detections, (VID_WIDTH, VID_HEIGHT)))
     
