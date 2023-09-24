@@ -6,3 +6,5 @@ Authors: Allen Tao, Sritejas Murugan
 `process_image.py`: Converts images found online to the dimensions and resolution of the webcam used
 
 Presentation and training data are included in this repo.
+
+![](https://github.com/allenapplehead/DaisyIntel2022/blob/main/CleaningDemo.gif)
